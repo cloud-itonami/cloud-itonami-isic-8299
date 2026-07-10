@@ -25,7 +25,8 @@
   (:require #?(:clj  [clojure.edn :as edn]
                :cljs [cljs.reader :as edn])
             [clojure.string :as str]
-            [langchain.model :as model]))
+            [langchain.model :as model]
+            [bizsupport.store :as store]))
 
 (defn- propose-decompose
   "Task decomposition/normalization — the LLM only structures the client's
@@ -76,6 +77,57 @@
      :columns   (if greedy? (into base greedy-extra) base)
      :confidence 0.9}))
 
+(defn- propose-screen
+  "Sanctions/PEP screening draft for a contracted operator. `screen-fn`
+  (operator NAME -> corporate-intel result, same signature as
+  `bizsupport.screening/screen` — wire it in directly, no adapter needed,
+  same convention as `cloud-itonami-isic-6910`'s
+  `(registrarllm/mock-advisor {:corporate-intel-screen ci/screen})`) is the
+  ONLY source of truth here — this proposal generator does no local
+  judgement, it just resolves `operator-id` to a name via `db` and shapes
+  whatever `cloud-itonami-isic-8291`'s DisclosureGovernor-approved (or
+  escalated, or held) answer was into a `:screening-verdict-set` record.
+  Mirrors `cloud-itonami-isic-6910`'s `formation.registrarllm/screen-kyc`
+  handling of its own corporate-intel cross-reference: a hit, an 8291-side
+  pending-human-review, and an 8291-side hold (contract/config problem on
+  the calling side) are three DISTINCT outcomes, none of which is silently
+  treated as clear."
+  [db {:keys [operator-id]} screen-fn]
+  (let [op-name (:name (store/operator db operator-id))
+        ci (screen-fn op-name)]
+    (cond
+      (:hit? ci)
+      {:summary    (str operator-id ": corporate-intelligence 照会で制裁/PEPフラグを検出")
+       :rationale  "cloud-itonami-isic-8291 の名前スクリーニングが一致を検出。人手確認とホールドが必須。"
+       :cites      [:corporate-intelligence]
+       :effect     :screening-verdict-set
+       :value      {:operator-id operator-id :verdict :hit}
+       :confidence 0.9}
+
+      (:pending-human-review? ci)
+      {:summary    (str operator-id ": corporate-intelligence 照会が人手レビュー待ち")
+       :rationale  "cloud-itonami-isic-8291 側の DisclosureGovernor が high-stakes escalate 中。確定するまでクリアにできない。"
+       :cites      [:corporate-intelligence]
+       :effect     :screening-verdict-set
+       :value      {:operator-id operator-id :verdict :incomplete}
+       :confidence 0.5}
+
+      (:held? ci)
+      {:summary    (str operator-id ": corporate-intelligence 照会が拒否された(契約/設定の問題)")
+       :rationale  (str "cloud-itonami-isic-8291 の DisclosureGovernor が本テナントの照会を拒否: " (pr-str (:reason ci)))
+       :cites      [:corporate-intelligence]
+       :effect     :screening-verdict-set
+       :value      {:operator-id operator-id :verdict :incomplete}
+       :confidence 0.4}
+
+      :else
+      {:summary    (str operator-id ": 制裁/PEPリスト非一致")
+       :rationale  "corporate-intelligence 照会クリア(または未収載)。"
+       :cites      [:corporate-intelligence]
+       :effect     :screening-verdict-set
+       :value      {:operator-id operator-id :verdict :clear}
+       :confidence 0.9})))
+
 (defn- propose-dispute
   "Dispute resolution draft. The LLM may draft a proposed resolution but
   this NEVER auto-applies — `bizsupport.policy` and `bizsupport.phase` both
@@ -89,16 +141,30 @@
    :value     {:patch {disputed-field claim}}
    :confidence 0.5})
 
+(def default-corporate-intel-screen
+  "No-op corporate-intelligence cross-reference: always 'nothing on file'.
+  This is the default so every existing caller of `infer`/`mock-advisor`
+  keeps working exactly as before — the cloud-itonami-isic-8291 wiring
+  (`bizsupport.screening/screen` or an equivalent) is a strict opt-in, not
+  required to run this actor standalone/offline."
+  (constantly {:found? false :hit? false}))
+
 (defn infer
   "Route a request to the right proposal generator.
-  request: {:op kw :subject id ...op-specific...}"
-  [{:keys [op] :as request}]
-  (case op
-    :task/decompose      (propose-decompose request)
-    :task/assign          (propose-assign request)
-    :disclosure/query     (propose-disclosure request)
-    :dispute/request       (propose-dispute request)
-    {:summary "未対応の操作" :rationale (str op) :cites [] :effect :noop :confidence 0.0}))
+  db: this actor's own `bizsupport.store/Store` (only `:operator/screen`
+      uses it, to resolve operator-id -> name before calling screen-fn).
+  request: {:op kw :subject id ...op-specific...}
+  screen-fn: operator NAME -> corporate-intel result (default: no-op)."
+  ([request] (infer nil request default-corporate-intel-screen))
+  ([db request] (infer db request default-corporate-intel-screen))
+  ([db {:keys [op] :as request} screen-fn]
+   (case op
+     :task/decompose      (propose-decompose request)
+     :task/assign          (propose-assign request)
+     :operator/screen       (propose-screen db request screen-fn)
+     :disclosure/query     (propose-disclosure request)
+     :dispute/request       (propose-dispute request)
+     {:summary "未対応の操作" :rationale (str op) :cites [] :effect :noop :confidence 0.0})))
 
 ;; ───────────────────────── Advisor protocol ─────────────────────────
 ;; The advisor is injected into the OperationActor, so the contained
@@ -111,8 +177,17 @@
   (-advise [advisor store request] "store + request → proposal map"))
 
 (defn mock-advisor
-  "The deterministic advisor (the `infer` logic above). Default everywhere."
-  [] (reify Advisor (-advise [_ _st req] (infer req))))
+  "The deterministic advisor (the `infer` logic above). Default everywhere.
+  opts:
+    :corporate-intel-screen — operator NAME -> corporate-intel result. Wire
+      `bizsupport.screening/screen` in directly (same signature, no adapter
+      needed). Default: no-op (never changes an `:operator/screen`
+      verdict), so `(mock-advisor)` with no args keeps every existing
+      caller's behavior unchanged."
+  ([] (mock-advisor {}))
+  ([{:keys [corporate-intel-screen]
+     :or   {corporate-intel-screen default-corporate-intel-screen}}]
+   (reify Advisor (-advise [_ st req] (infer st req corporate-intel-screen)))))
 
 (def ^:private system-prompt
   (str "あなたは業務委託タスクの分解・割当アドバイザーです。"
@@ -120,7 +195,7 @@
        "説明や前置きは一切書かず、EDN だけを出力します。\n"
        "キー: :summary(人向けドラフト) :rationale(根拠) "
        ":cites(使った事実キーのベクタ) "
-       ":effect(:task-upsert|:assignment-upsert|:disclosure-serve|:dispute-apply) "
+       ":effect(:task-upsert|:assignment-upsert|:screening-verdict-set|:disclosure-serve|:dispute-apply) "
        ":value(該当マップ) :confidence(0..1)。\n"
        "重要: クライアントの個人識別情報(SSN・決済カード・住所・口座)に"
        "関する情報は一切扱ってはいけません(スキーマにそのフィールドは存在しません)。"

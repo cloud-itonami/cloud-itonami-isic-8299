@@ -7,28 +7,38 @@
   (assign/disclose nothing) — this actor's analog of `cloud-itonami-
   isic-6311`'s MarketDataGovernor and robotaxi's Minimal Risk Condition.
 
-  Eight checks, in priority order. The first five are HARD violations: a
+  Nine checks, in priority order. The first six are HARD violations: a
   human approver CANNOT override them. The last three are SOFT/always-
   escalate: they route to a human, who may approve.
 
-    1. rbac                — does actor-role have permission for op?
-    2. clearance-tier-gate  — does the proposed operator hold every
-                              certification the task requires? (this
-                              actor's analog of source-basis: an operator
-                              or task citing a certification class outside
-                              `bizsupport.facts/allowed-certification-
-                              classes` is rejected outright)
-    3. capacity-gate        — would this assignment push the operator's
-                              committed hours past their weekly capacity?
-    4. scope-gate           — does the proposal touch a schema-excluded
-                              (raw client PII) field?
-    5. licensed-disclosure  — is there an active, scoped contract, and does
-                              the proposed column set stay within its tier?
-    6. confidence floor     — LLM confidence below threshold → escalate.
-    7. high-value-task gate — the task is flagged :high-value → always
-                              escalate.
-    8. dispute requests     — a dispute NEVER auto-resolves, at any
-                              confidence, any phase."
+    1. rbac                    — does actor-role have permission for op?
+    2. clearance-tier-gate     — does the proposed operator hold every
+                                  certification the task requires? (this
+                                  actor's analog of source-basis: an
+                                  operator or task citing a certification
+                                  class outside `bizsupport.facts/allowed-
+                                  certification-classes` is rejected
+                                  outright)
+    3. sanctions-screening-gate — is the proposed operator's on-file
+                                  cloud-itonami-isic-8291 screening verdict
+                                  `:hit`? If so, this operator can NEVER be
+                                  assigned, at any confidence, regardless of
+                                  which certifications they hold — no
+                                  analog in any sibling actor (optional
+                                  integration, see `bizsupport.screening`).
+    4. capacity-gate            — would this assignment push the operator's
+                                  committed hours past their weekly
+                                  capacity?
+    5. scope-gate               — does the proposal touch a schema-excluded
+                                  (raw client PII) field?
+    6. licensed-disclosure      — is there an active, scoped contract, and
+                                  does the proposed column set stay within
+                                  its tier?
+    7. confidence floor         — LLM confidence below threshold → escalate.
+    8. high-value-task gate     — the task is flagged :high-value → always
+                                  escalate.
+    9. dispute requests         — a dispute NEVER auto-resolves, at any
+                                  confidence, any phase."
   (:require [clojure.set :as set]
             [bizsupport.facts :as facts]
             [bizsupport.store :as store]))
@@ -46,8 +56,8 @@
 
 (def permissions
   "actor-role → set of operations it may perform."
-  {:dispatcher   #{:task/decompose :task/assign}
-   :ops-manager  #{:task/decompose :task/assign :dispute/request}
+  {:dispatcher   #{:task/decompose :task/assign :operator/screen}
+   :ops-manager  #{:task/decompose :task/assign :operator/screen :dispute/request}
    :client       #{:disclosure/query}})
 
 (def tier-columns
@@ -87,6 +97,22 @@
         (seq missing)
         [{:rule :clearance-tier-gate
           :detail (str "operator が保持しない必須証明: " (vec missing))}]))))
+
+(defn- sanctions-screening-violations
+  "Only `:task/assign` proposes an operator↔task pairing. If the store
+  already holds a `:hit` screening verdict for the proposed operator (from
+  a prior `:operator/screen` commit — see `bizsupport.screening`), the
+  assignment is a HARD rejection regardless of certifications held or
+  confidence. Optional-integration: when no screening has ever been run
+  for this operator, `screening-of` returns nil and this check is silent —
+  it does not require the cloud-itonami-isic-8291 wiring to be present."
+  [{:keys [op]} proposal st]
+  (when (= op :task/assign)
+    (let [operator-id (get-in proposal [:value :operator-id])
+          sc (store/screening-of st operator-id)]
+      (when (= :hit (:verdict sc))
+        [{:rule :sanctions-screening-gate
+          :detail (str "operator " operator-id " は制裁/PEPスクリーニングで hit 判定済み")}]))))
 
 (defn- capacity-violations
   "Only `:task/assign` commits operator hours. Pushing an operator past
@@ -135,9 +161,9 @@
    {:ok? bool :violations [..] :confidence c :escalate? bool :high-value?
     bool :hard? bool :dispute? bool}.
 
-   - :hard?       — at least one HARD violation (clearance-tier/capacity/
-                    scope/licensed-disclosure). Forces HOLD; a human
-                    cannot override.
+   - :hard?       — at least one HARD violation (clearance-tier/sanctions-
+                    screening/capacity/scope/licensed-disclosure). Forces
+                    HOLD; a human cannot override.
    - :escalate?   — soft: low confidence, high-value task, OR a dispute
                     request. A human decides.
    - :ok?         — clean AND not escalating: safe to auto-commit/-serve."
@@ -145,6 +171,7 @@
   (let [hard    (into []
                       (concat (rbac-violations request context)
                               (clearance-tier-violations request proposal st)
+                              (sanctions-screening-violations request proposal st)
                               (capacity-violations request proposal st)
                               (scope-violations proposal)
                               (licensed-disclosure-violations request context proposal st)))

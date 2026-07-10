@@ -27,7 +27,7 @@
   disposition plus a reason when the phase changed it.")
 
 (def read-ops  #{:disclosure/query})
-(def write-ops #{:task/decompose :task/assign :dispute/request})
+(def write-ops #{:task/decompose :task/assign :operator/screen :dispute/request})
 
 (def phases
   "phase → {:label .. :writes <ops allowed to write> :auto <ops allowed to
@@ -37,10 +37,10 @@
                                 :auto #{}}
    1 {:label "assisted-intake" :writes #{:task/decompose}
                                 :auto #{}}
-   2 {:label "assisted-assign" :writes #{:task/decompose :task/assign :dispute/request}
+   2 {:label "assisted-assign" :writes #{:task/decompose :task/assign :operator/screen :dispute/request}
                                 :auto #{}}
-   3 {:label "supervised-auto" :writes #{:task/decompose :task/assign :dispute/request}
-                                :auto #{:task/decompose :task/assign}}})
+   3 {:label "supervised-auto" :writes #{:task/decompose :task/assign :operator/screen :dispute/request}
+                                :auto #{:task/decompose :task/assign :operator/screen}}})
 
 (def default-phase
   "The phase used when `context` carries no :phase at all

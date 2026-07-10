@@ -37,6 +37,7 @@
   (all-operators [s])
   (assignment [s id])
   (assignments-of-operator [s operator-id])
+  (screening-of [s operator-id] "most recent sanctions/PEP screening verdict on file for this operator, or nil if never screened")
   (contract [s tenant])
   (ledger [s])
   (commit-record! [s record] "apply a committed op's record to the SSoT")
@@ -44,13 +45,20 @@
   (with-tasks [s tasks]             "replace/seed tasks (map id→task)")
   (with-operators [s operators]     "replace/seed operators (map id→operator)")
   (with-assignments [s assignments] "replace/seed assignments (map id→assignment)")
+  (with-screenings [s screenings]   "replace/seed operator screening verdicts (map operator-id→screening)")
   (with-contracts [s contracts]     "replace/seed subscriber contracts (map tenant→contract)"))
 
 ;; ───────────────────────── demo data (fictitious, non-real people) ──────
 
 (defn demo-data
   "A small, entirely fictitious dataset so the actor + tests run offline
-  and no real client/operator is ever named in this repository."
+  and no real client/operator is ever named in this repository. `op-300`'s
+  name deliberately matches `cloud-itonami-isic-8291`'s own demo sanctions-
+  flagged official (`of-2`, org `co-200`, see `dossier.store/demo-data`) —
+  it exists purely so `bizsupport.screening`'s real (unmocked) 8291
+  integration has a genuine, reproducible hit to catch in tests, the same
+  cross-repo-name-sharing convention `cloud-itonami-isic-6910`'s
+  `formation.store/demo-data` uses for its own `o-4`."
   []
   {:tasks
    {"tk-100" {:id "tk-100" :client-id "cl-100" :title "Patient intake data entry (demo)"
@@ -66,7 +74,9 @@
    {"op-100" {:id "op-100" :name "Alice (demo)" :certifications #{:hipaa :soc2}
               :weekly-capacity-hours 40 :committed-hours 30}
     "op-200" {:id "op-200" :name "Bob (demo)" :certifications #{:soc2}
-              :weekly-capacity-hours 20 :committed-hours 18}}
+              :weekly-capacity-hours 20 :committed-hours 18}
+    "op-300" {:id "op-300" :name "Jane Smith (demo)" :certifications #{:soc2}
+              :weekly-capacity-hours 40 :committed-hours 0}}
    :contracts
    {"tenant-acme"  {:tenant "tenant-acme" :tier :tier/pro :active? true :purpose :bpo-client}
     "tenant-basic" {:tenant "tenant-basic" :tier :tier/basic :active? true :purpose :bpo-client}}})
@@ -82,28 +92,31 @@
   (assignment [_ id] (get-in @a [:assignments id]))
   (assignments-of-operator [_ operator-id]
     (->> (vals (:assignments @a)) (filter #(= operator-id (:operator-id %))) (sort-by :id)))
+  (screening-of [_ operator-id] (get-in @a [:screenings operator-id]))
   (contract [_ tenant] (get-in @a [:contracts tenant]))
   (ledger [_] (:ledger @a))
   (commit-record! [s {:keys [effect path value]}]
     (case effect
-      :task-upsert       (swap! a update-in [:tasks (:id value)] merge value)
-      :assignment-upsert (do (swap! a update-in [:assignments (:id value)] merge value)
-                              (let [t (task s (:task-id value))]
-                                (swap! a update-in [:operators (:operator-id value) :committed-hours]
-                                       (fnil + 0) (:estimated-hours t 0))))
-      :dispute-apply     (swap! a update-in [:assignments (first path)] merge (:patch value))
+      :task-upsert            (swap! a update-in [:tasks (:id value)] merge value)
+      :assignment-upsert      (do (swap! a update-in [:assignments (:id value)] merge value)
+                                   (let [t (task s (:task-id value))]
+                                     (swap! a update-in [:operators (:operator-id value) :committed-hours]
+                                            (fnil + 0) (:estimated-hours t 0))))
+      :screening-verdict-set  (swap! a assoc-in [:screenings (:operator-id value)] value)
+      :dispute-apply          (swap! a update-in [:assignments (first path)] merge (:patch value))
       nil)
     s)
   (append-ledger! [_ fact] (swap! a update :ledger conj fact) fact)
   (with-tasks [s ts]       (when (seq ts) (swap! a assoc :tasks ts)) s)
   (with-operators [s os]   (when (seq os) (swap! a assoc :operators os)) s)
   (with-assignments [s as] (when (seq as) (swap! a assoc :assignments as)) s)
+  (with-screenings [s scs] (when (seq scs) (swap! a assoc :screenings scs)) s)
   (with-contracts [s cts]  (when (seq cts) (swap! a assoc :contracts cts)) s))
 
 (defn seed-db
   "A MemStore seeded with the demo data. The deterministic default."
   []
-  (->MemStore (atom (assoc (demo-data) :assignments {} :ledger []))))
+  (->MemStore (atom (assoc (demo-data) :assignments {} :screenings {} :ledger []))))
 
 ;; ───────────────────────── DatomicStore (langchain.db) ─────────────────
 
@@ -112,11 +125,12 @@
   Map/compound values (required-certifications, source citations) are
   stored as EDN strings so `langchain.db` doesn't expand them into
   sub-entities."
-  {:task/id         {:db/unique :db.unique/identity}
-   :operator/id     {:db/unique :db.unique/identity}
-   :assignment/id   {:db/unique :db.unique/identity}
-   :contract/tenant {:db/unique :db.unique/identity}
-   :ledger/seq      {:db/unique :db.unique/identity}})
+  {:task/id              {:db/unique :db.unique/identity}
+   :operator/id          {:db/unique :db.unique/identity}
+   :assignment/id        {:db/unique :db.unique/identity}
+   :screening/operator-id {:db/unique :db.unique/identity}
+   :contract/tenant      {:db/unique :db.unique/identity}
+   :ledger/seq           {:db/unique :db.unique/identity}})
 
 (defn- enc [v] (pr-str v))
 (defn- dec* [s] (when s (edn/read-string s)))
@@ -158,6 +172,16 @@
 (def ^:private operator-pull
   [:operator/id :operator/name :operator/certifications
    :operator/weekly-capacity-hours :operator/committed-hours])
+
+(defn- screening->tx [{:keys [operator-id verdict]}]
+  {:screening/operator-id operator-id :screening/verdict verdict})
+
+(defn- pull->screening [m]
+  (when (:screening/operator-id m)
+    {:operator-id (:screening/operator-id m) :verdict (:screening/verdict m)}))
+
+(def ^:private screening-pull
+  [:screening/operator-id :screening/verdict])
 
 (defn- assignment->tx [{:keys [id task-id operator-id status]}]
   {:assignment/id id :assignment/task-id task-id
@@ -201,6 +225,8 @@
               (d/db conn) operator-id)
          (map #(pull->assignment (d/pull (d/db conn) assignment-pull [:assignment/id %])))
          (sort-by :id)))
+  (screening-of [_ operator-id]
+    (pull->screening (d/pull (d/db conn) screening-pull [:screening/operator-id operator-id])))
   (contract [_ tenant] (pull->contract (d/pull (d/db conn) contract-pull [:contract/tenant tenant])))
   (ledger [_]
     (->> (d/q '[:find ?s ?f :where [?e :ledger/seq ?s] [?e :ledger/fact ?f]] (d/db conn))
@@ -208,12 +234,13 @@
          (mapv (comp dec* second))))
   (commit-record! [s {:keys [effect path value]}]
     (case effect
-      :task-upsert       (d/transact! conn [(task->tx value)])
-      :assignment-upsert (do (d/transact! conn [(assignment->tx value)])
-                              (let [t (task s (:task-id value))
-                                    op (operator s (:operator-id value))]
-                                (d/transact! conn [(operator->tx (update op :committed-hours
-                                                                          (fnil + 0) (:estimated-hours t 0)))])))
+      :task-upsert            (d/transact! conn [(task->tx value)])
+      :assignment-upsert      (do (d/transact! conn [(assignment->tx value)])
+                                   (let [t (task s (:task-id value))
+                                         op (operator s (:operator-id value))]
+                                     (d/transact! conn [(operator->tx (update op :committed-hours
+                                                                               (fnil + 0) (:estimated-hours t 0)))])))
+      :screening-verdict-set  (d/transact! conn [(screening->tx value)])
       :dispute-apply
       (d/transact! conn [(assignment->tx (merge (assignment s (first path)) (:patch value)))])
       nil)
@@ -227,6 +254,8 @@
     (when (seq os) (d/transact! conn (mapv operator->tx (vals os)))) s)
   (with-assignments [s as]
     (when (seq as) (d/transact! conn (mapv assignment->tx (vals as)))) s)
+  (with-screenings [s scs]
+    (when (seq scs) (d/transact! conn (mapv screening->tx (vals scs)))) s)
   (with-contracts [s cts]
     (when (seq cts) (d/transact! conn (mapv contract->tx (vals cts)))) s))
 
@@ -234,10 +263,11 @@
   "A DatomicStore (langchain.db backend) seeded from `data`; empty when
   omitted."
   ([] (datomic-store {}))
-  ([{:keys [tasks operators assignments contracts]}]
+  ([{:keys [tasks operators assignments screenings contracts]}]
    (let [s (->DatomicStore (d/create-conn schema))]
      (-> s (with-tasks tasks) (with-operators operators)
-         (with-assignments assignments) (with-contracts contracts)))))
+         (with-assignments assignments) (with-screenings screenings)
+         (with-contracts contracts)))))
 
 (defn datomic-seed-db
   "A DatomicStore seeded with the demo data — the Datomic-backed analog of

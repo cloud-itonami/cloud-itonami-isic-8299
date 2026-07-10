@@ -43,6 +43,29 @@ The governed read op is the actual product surface: `:disclosure/query`
 always runs through the RoutingGovernor's licensed-disclosure check — there
 is no bypass.
 
+## Consuming cloud-itonami-isic-8291 for operator screening
+
+`src/bizsupport/screening.cljc` is an **optional** integration with
+[`cloud-itonami-isic-8291`](https://github.com/cloud-itonami/cloud-itonami-isic-8291)
+(Dossier-LLM ⊣ DisclosureGovernor corporate/compliance intelligence actor):
+before an operator is assignable to sensitive client work, `:operator/
+screen` cross-references their name against 8291's sourced PEP/sanctions
+data via the SAME governed `:disclosure/screen-name` op any other licensed
+consumer would use — there is no bypass of 8291's own DisclosureGovernor
+from this side either. An operator with a `:hit` verdict on file can never
+be assigned via `:task/assign`, at any confidence, regardless of which
+certifications they hold — `sanctions-screening-gate` is a HARD,
+un-overridable check. This is the same `:corporate-intelligence` wholesale
+pattern `cloud-itonami-isic-6910`'s `formation.corporate-intel` established
+(ADR-2607110400 §5, ADR-2607115400 for this actor's wiring).
+
+Only `bizsupport.screening` itself requires `dossier.*` — the core
+`bizsupport.{store,policy,llm,operation}` namespaces have zero compile-time
+dependency on it, so this actor still runs fully standalone/offline for any
+deployment that never wires the integration in
+(`(llm/mock-advisor {:corporate-intel-screen screening/screen})` opts in;
+`(llm/mock-advisor)` with no args stays the default no-op).
+
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the full architecture and
 [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md) for the
 decision record. See [`docs/business-model.md`](docs/business-model.md) and

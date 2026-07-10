@@ -4,7 +4,20 @@
  ;; the kotoba-lang org of this workspace (kotoba wasm → clojurewasm →
  ;; ClojureScript → nbb runtime priority, CLAUDE.md).
  :deps {io.github.kotoba-lang/langgraph
-        {:local/root "../../kotoba-lang/langgraph"}}
+        {:local/root "../../kotoba-lang/langgraph"}
+        ;; optional: bizsupport.screening's cross-reference into
+        ;; cloud-itonami-isic-8291 (com-junkawasaki/root superproject
+        ;; ADR-2607115400) for operator sanctions/PEP screening before
+        ;; task assignment. Only bizsupport.screening itself requires
+        ;; dossier.* -- the core bizsupport.{store,policy,llm,operation}
+        ;; namespaces have zero compile-time dependency on it, same
+        ;; isolation shape as cloud-itonami-isic-6910's
+        ;; formation.corporate-intel -> cloud-itonami-isic-8291
+        ;; cross-reference. A :local/root classpath entry is not itself
+        ;; I/O -- this actor still runs fully standalone/offline for any
+        ;; caller that never requires bizsupport.screening.
+        io.github.cloud-itonami/cloud-itonami-isic-8291
+        {:local/root "../cloud-itonami-isic-8291"}}
  :aliases
  {;; offline workspace dev — pin transitive langchain to local checkout
   :dev {:override-deps

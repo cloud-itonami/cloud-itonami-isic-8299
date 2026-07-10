@@ -18,7 +18,8 @@
       (is (= #{:hipaa :soc2} (:certifications (store/operator s "op-100"))))
       (is (= 30 (:committed-hours (store/operator s "op-100"))))
       (is (= 3 (count (store/all-tasks s))))
-      (is (= 2 (count (store/all-operators s)))))))
+      (is (= 3 (count (store/all-operators s))))
+      (is (nil? (store/screening-of s "op-100")) "unscreened operator has no verdict on file"))))
 
 (deftest write-and-ledger-parity
   (doseq [[label s] (backends)]
@@ -32,6 +33,10 @@
                                  :value {:id "tk-100-op-100" :task-id "tk-100" :operator-id "op-100" :status :assigned}})
         (is (= :assigned (:status (store/assignment s "tk-100-op-100"))))
         (is (= 35 (:committed-hours (store/operator s "op-100"))) "30 + tk-100's 5h"))
+      (testing "screening-verdict-set commits and reads back via screening-of"
+        (store/commit-record! s {:effect :screening-verdict-set
+                                 :value {:operator-id "op-300" :verdict :hit}})
+        (is (= :hit (:verdict (store/screening-of s "op-300")))))
       (testing "dispute-apply patches the target assignment"
         (store/commit-record! s {:effect :dispute-apply
                                  :value {:patch {:status :disputed}}
