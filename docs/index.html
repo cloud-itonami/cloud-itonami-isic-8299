@@ -39,13 +39,13 @@
 <body>
   <main class="container">
     <h1>cloud-itonami-isic-8299</h1>
-    <div class="badge">ISIC 8299 · maturity unknown</div>
+    <div class="badge">ISIC 8299 · open blueprint</div>
     <div class="pitch">
-      <p>Open Business Blueprint for ISIC Rev.4 8299: other business support service activities n.e.c., narrowed to a virtual-assistant / BPO task-matching service — dispatching client work requests (research, scheduling, data entry, customer-support overflow) to a pool of contracted human operators — published as an OSS business that any qualified operator can fork, deploy, run, improve and sell.</p>
-      <p>Built on this workspace's [langgraph](https://github.com/kotoba-lang/langgraph) StateGraph runtime (portable .cljc, supervised superstep loop, interrupts, Datomic/in-mem checkpoints) — the same actor pattern as [cloud-itonami-isic-6311](https://github.com/cloud-itonami/cloud-itonami-isic-6311) and [cloud-itonami-isic-8291](https://github.com/cloud-itonami/cloud-itonami-isic-8291).</p>
-      <p>&gt; Why an actor layer at all? A TaskRouter-LLM is great at drafting a &gt; task breakdown and suggesting who might handle it — but it has no &gt; notion of an operator's certification entitlement, weekly capacity &gt; limits, or a client's PII scope boundary. Letting it assign work &gt; directly invites a task requiring HIPAA/PCI-DSS handling routed to an &gt; uncertified operator, an operator silently overcommitted past their &gt; stated capacity, or client-confidential identifiers leaking into a task &gt; record. This project seals the TaskRouter-LLM into a single node and &gt; wraps it with an independent RoutingGovernor, a human review &gt; workflow, and an immutable audit ledger.</p>
+      <p><strong>Problem:</strong> TaskRouter-LLMs route work requests to human operators but can't enforce certification, capacity limits, or data boundaries—risking uncertified handlers, overcommitment, and PII leaks.</p>
+      <p><strong>How:</strong> RoutingGovernor—an independent system that holds unsafe commits. Every assignment runs through certification checks, capacity gates, and governed disclosure before commit to an immutable audit ledger.</p>
+      <p><strong>What it is NOT:</strong> employment/payroll (see isic-7820 for that model). This actor matches certified tasks to available operators and publishes governed disclosures only.</p>
     </div>
-    <p class="meta">Domain <code>operations</code> · Governor <code>governor</code> · License <code>AGPL-3.0-or-later</code></p>
+    <p class="meta">Domain <code>operations</code> · Governor <code>RoutingGovernor</code> · License <code>AGPL-3.0-or-later</code></p>
     <div class="cta">
       <a class="primary" href="https://itonami.cloud/isco-1212/">Fork + self-host claim</a>
       <a class="secondary" href="https://itonami.cloud/docs/go-live.md">Paid go-live path</a>

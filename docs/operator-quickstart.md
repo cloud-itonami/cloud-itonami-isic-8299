@@ -2,6 +2,12 @@
 
 Shortest path from clone to a verified local dry-run for **ISIC 8299** (`cloud-itonami-isic-8299`).
 
+## Who this is for
+
+- Operators and developers building or forking governed task-dispatch services
+- Teams that need proven PII/certification/capacity safeguards before going live
+- Anyone evaluating the ISIC 8299 open business blueprint
+
 ## Prerequisites
 
 - Clojure 1.12+ (`clojure --version`)
@@ -20,10 +26,10 @@ cd cloud-itonami-isic-8299
 ## 2. Run tests
 
 ```bash
-clojure -M:test
+clojure -M:dev:test
 ```
 
-Expect green if maturity is `unknown`. Fix failures before operating.
+Verify governor contract, store parity, phases, and facts. Fix failures before operating.
 
 ## 3. Open the product face
 
@@ -33,11 +39,11 @@ open docs/index.html   # or: python3 -m http.server -d docs 8080
 
 Publish: enable GitHub Pages on `main` `/docs`, or any static host.
 
-## 4. Where the Governor sits
+## 4. Where the RoutingGovernor sits
 
-- Blueprint governor key: `governor`
-- Likely source path: `src/**/governor.cljc`
-- Pattern: advise → govern → phase-gate → commit | escalate | hold (itonami actor / ADR-2607011000)
+- Blueprint key: `RoutingGovernor`
+- Source: `src/bizsupport/governor.cljc` (certification, capacity, scope gating)
+- Pattern: TaskRouter-LLM proposes → RoutingGovernor validates → commit to audit ledger or hold
 
 ## 5. Claim / go-live
 
