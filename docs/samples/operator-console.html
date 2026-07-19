@@ -1,0 +1,79 @@
+<html><head><meta charset="utf-8"><title>cloud-itonami-isic-8299 &middot; other-business-support-services</title><style>
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ok { color: #137a3f; }
+body { font-family: system-ui,-apple-system,sans-serif; margin: 0; color: #1a1a1a; background: #fafafa; }
+header.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: #fff; border-bottom: 1px solid #e5e5e5; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; }
+h2 { margin-top: 0; font-size: 15px; }
+.warn { color: #b25c00; background: #fff8e1; padding: 2px 6px; border-radius: 4px; }
+main { max-width: 980px; margin: 24px auto; padding: 0 20px; }
+header.bar h1 { font-size: 18px; margin: 0; font-weight: 600; }
+.muted { color: #888; font-size: 13px; }
+.critical { color: #fff; background: #b3261e; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+.card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.err { color: #b3261e; background: #fbe9e7; padding: 2px 6px; border-radius: 4px; }
+th { font-weight: 600; color: #555; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+header.bar .badge { margin-left: auto; font-size: 12px; color: #666; }
+code { font-size: 12px; background: #f4f4f4; padding: 1px 4px; border-radius: 3px; }
+</style></head><body>
+<header class="bar">
+  <h1>Business support services (ISIC 8299) — Operator Console</h1>
+  <span class="badge">read-only sample · governor-gated · task/operator pairing always clearance+capacity checked</span>
+</header>
+<main>
+  <section class="card">
+    <h2>Tasks</h2>
+    <p class="muted">Demo snapshot — build-time-generated from <code>bizsupport.store</code> via <code>bizsupport.render-html</code> (<code>clojure -M:dev:render-html</code>), regenerated nightly.</p>
+    <table>
+      <thead><tr><th>Task</th><th>Title</th><th>Value tier</th><th>Status</th><th>Last op status</th></tr></thead>
+      <tbody>
+        <tr><td>tk-100</td><td>Patient intake data entry (demo)</td><td>standard</td><td>open</td><td><span class="critical">HARD hold &middot; clearance-tier-gate</span></td></tr>
+        <tr><td>tk-200</td><td>Executive calendar management (demo)</td><td>high-value</td><td>open</td><td><span class="ok">committed</span></td></tr>
+        <tr><td>tk-300</td><td>General research brief (demo)</td><td>standard</td><td>open</td><td><span class="critical">HARD hold &middot; capacity-gate</span></td></tr>
+        <tr><td>tk-400</td><td>General correspondence drafting (demo)</td><td>standard</td><td>open</td><td><span class="ok">committed</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Contracted operators</h2>
+    <p class="muted">Committed / weekly-capacity hours after this run — a HARD capacity-gate hold never adds committed hours.</p>
+    <table>
+      <thead><tr><th>Operator</th><th>Name</th><th>Certifications</th><th>Committed / capacity</th></tr></thead>
+      <tbody>
+        <tr><td>op-100</td><td>Alice (demo)</td><td>hipaa, soc2</td><td>37 / 40 h</td></tr>
+        <tr><td>op-200</td><td>Bob (demo)</td><td>soc2</td><td>18 / 20 h</td></tr>
+        <tr><td>op-300</td><td>Jane Smith (demo)</td><td>soc2</td><td>0 / 40 h</td></tr>
+      </tbody>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Action gate (RoutingGovernor)</h2>
+    <p class="muted">HARD holds cannot be overridden. A required certification the operator does not hold, or an assignment that would exceed capacity, is rejected outright — never trusted from the TaskRouter-LLM's proposal.</p>
+    <table>
+      <thead><tr><th>Op</th><th>Gate</th></tr></thead>
+      <tbody>
+        <tr><td><code>:task/decompose</code></td><td><span class="ok">auto-commit when clean (no PII, no capital risk)</span></td></tr>
+        <tr><td><code>:task/assign</code></td><td><span class="ok">auto-commit when clearance-tier + capacity clean</span> &middot; <span class="critical">HARD reject on missing certification, over-capacity, or sanctions-screening hit</span></td></tr>
+        <tr><td><code>:disclosure/query</code></td><td><span class="critical">HARD reject on missing/inactive contract or over-tier columns</span></td></tr>
+        <tr><td><code>:dispute/request</code></td><td><span class="warn">ALWAYS human review — never auto-resolves, at any phase or confidence</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Audit ledger (this run)</h2>
+    <p class="muted">Append-only decision-fact log — every commit and HARD hold this scenario produced.</p>
+    <table>
+      <thead><tr><th>Fact</th><th>Op</th><th>Subject</th><th>Basis</th></tr></thead>
+      <tbody>
+        <tr><td>committed</td><td><code>decompose</code></td><td>tk-400</td><td>id, client-id, title, required-certifications, estimated-hours, value-tier, status</td></tr>
+        <tr><td>committed</td><td><code>assign</code></td><td>tk-400</td><td>task-id, operator-id</td></tr>
+        <tr><td>committed</td><td><code>assign</code></td><td>tk-200</td><td>task-id, operator-id</td></tr>
+        <tr><td>committed</td><td><code>request</code></td><td>tk-400-op-100</td><td>status</td></tr>
+        <tr><td>policy-hold</td><td><code>assign</code></td><td>tk-100</td><td>clearance-tier-gate</td></tr>
+        <tr><td>policy-hold</td><td><code>assign</code></td><td>tk-300</td><td>capacity-gate</td></tr>
+        <tr><td>policy-hold</td><td><code>decompose</code></td><td>tk-500</td><td>scope-gate</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body></html>
