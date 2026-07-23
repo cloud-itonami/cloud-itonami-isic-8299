@@ -44,6 +44,19 @@ jobs:
         with:
           repository: kotoba-lang/langchain
           path: orgs/kotoba-lang/langchain
+      # deps.edn declares an unconditional top-level :local/root dep on
+      # cloud-itonami-isic-8291 (bizsupport.screening's cross-reference),
+      # and that repo itself needs kotoba-lang/langchain-store via
+      # :local/root -- both are required for tools.deps to resolve the
+      # classpath even though most namespaces here never touch either.
+      - uses: actions/checkout@v4
+        with:
+          repository: cloud-itonami/cloud-itonami-isic-8291
+          path: orgs/cloud-itonami/cloud-itonami-isic-8291
+      - uses: actions/checkout@v4
+        with:
+          repository: kotoba-lang/langchain-store
+          path: orgs/kotoba-lang/langchain-store
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "21" }
       - uses: DeLaGuardo/setup-clojure@13.0

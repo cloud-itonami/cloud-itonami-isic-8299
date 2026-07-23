@@ -24,6 +24,10 @@ jobs:
       # sibling checkout to exist to resolve the classpath at all).
       - uses: actions/checkout@v4
         with: {repository: cloud-itonami/cloud-itonami-isic-8291, path: orgs/cloud-itonami/cloud-itonami-isic-8291}
+      # cloud-itonami-isic-8291 itself needs kotoba-lang/langchain-store
+      # via :local/root -- missing this made this workflow fail (2026-07-23).
+      - uses: actions/checkout@v4
+        with: {repository: kotoba-lang/langchain-store, path: orgs/kotoba-lang/langchain-store}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "21" }
       - uses: DeLaGuardo/setup-clojure@13.0
