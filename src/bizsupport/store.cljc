@@ -17,10 +17,35 @@
   certifications, estimated hours, value tier, status — NEVER a raw
   personal/financial identifier of the client), an operator (contracted
   human worker — certifications, weekly capacity, committed hours), an
-  assignment (task↔operator edge), and a client subscription contract.
+  assignment (task↔operator edge), a client subscription contract, and a
+  CANDIDATE (someone who applied to join the operator pool but has not
+  been admitted — see below).
   There is NO field anywhere in this schema for a client's SSN, payment
   card, home address or financial account — the scope boundary is
   structural, not a runtime filter someone could forget to call.
+
+  A candidate is `{:id :handle :claimed-certifications :weekly-capacity-
+  hours :remote? :contact-ref :referral-source :status}` and lives in its
+  OWN map, never in `:operators`. Two reasons, both structural rather than
+  procedural:
+
+    1. `all-operators`/`operator` must never return someone who has not
+       been admitted, or an assignment could reach a person who never
+       agreed to work — separation by container makes that unreachable
+       instead of relying on every caller to filter on a status field.
+    2. The same no-PII discipline the client side has, applied to the
+       applicant side: `:handle` is a self-chosen public handle and
+       `:contact-ref` is an opaque POINTER to where the conversation
+       already lives (e.g. `\"gh-issue:cloud-itonami/cloud-itonami-isic-
+       6399#12\"`) — not a legal name, address, phone number, email,
+       date of birth, national id or bank account. There is no field for
+       any of those, and `bizsupport.policy`'s scope-gate rejects a
+       proposal that tries to carry one anyway.
+
+  Admission (`:candidate-admit`) creates the operator record and marks the
+  application `:admitted`; the application itself is kept, not deleted, so
+  'who was admitted/declined, on whose sign-off, on what basis' stays a
+  query over the append-only ledger plus the retained application.
 
   The ledger stays append-only on every backend — 'who assigned what to
   whom, on what certification/capacity basis' is always a query over an
@@ -38,6 +63,8 @@
   (assignment [s id])
   (assignments-of-operator [s operator-id])
   (screening-of [s operator-id] "most recent sanctions/PEP screening verdict on file for this operator, or nil if never screened")
+  (candidate [s id] "a pool APPLICANT, never an admitted operator (see ns docstring)")
+  (all-candidates [s])
   (contract [s tenant])
   (ledger [s])
   (commit-record! [s record] "apply a committed op's record to the SSoT")
@@ -46,6 +73,7 @@
   (with-operators [s operators]     "replace/seed operators (map id→operator)")
   (with-assignments [s assignments] "replace/seed assignments (map id→assignment)")
   (with-screenings [s screenings]   "replace/seed operator screening verdicts (map operator-id→screening)")
+  (with-candidates [s candidates]   "replace/seed pool applications (map id→candidate)")
   (with-contracts [s contracts]     "replace/seed subscriber contracts (map tenant→contract)"))
 
 ;; ───────────────────────── demo data (fictitious, non-real people) ──────
@@ -77,6 +105,17 @@
               :weekly-capacity-hours 20 :committed-hours 18}
     "op-300" {:id "op-300" :name "Jane Smith (demo)" :certifications #{:soc2}
               :weekly-capacity-hours 40 :committed-hours 0}}
+   ;; One pending application, so the recruitment flow (apply -> human
+   ;; sign-off -> admit|decline) has something real to walk in the demo
+   ;; and tests. No legal name, no contact detail -- a self-chosen handle
+   ;; and a pointer to the public issue the conversation lives in.
+   :candidates
+   {"cand-100" {:id "cand-100" :handle "kaede (demo)"
+                :claimed-certifications #{:soc2} :weekly-capacity-hours 12
+                :remote? true
+                :contact-ref "gh-issue:cloud-itonami/cloud-itonami-isic-6399#0"
+                :referral-source :public-board
+                :status :candidate}}
    :contracts
    {"tenant-acme"  {:tenant "tenant-acme" :tier :tier/pro :active? true :purpose :bpo-client}
     "tenant-basic" {:tenant "tenant-basic" :tier :tier/basic :active? true :purpose :bpo-client}}})
@@ -93,6 +132,8 @@
   (assignments-of-operator [_ operator-id]
     (->> (vals (:assignments @a)) (filter #(= operator-id (:operator-id %))) (sort-by :id)))
   (screening-of [_ operator-id] (get-in @a [:screenings operator-id]))
+  (candidate [_ id] (get-in @a [:candidates id]))
+  (all-candidates [_] (sort-by :id (vals (:candidates @a))))
   (contract [_ tenant] (get-in @a [:contracts tenant]))
   (ledger [_] (:ledger @a))
   (commit-record! [s {:keys [effect path value]}]
@@ -103,6 +144,23 @@
                                      (swap! a update-in [:operators (:operator-id value) :committed-hours]
                                             (fnil + 0) (:estimated-hours t 0))))
       :screening-verdict-set  (swap! a assoc-in [:screenings (:operator-id value)] value)
+      :candidate-upsert       (swap! a update-in [:candidates (:id value)] merge value)
+      ;; Admission is the only path into `:operators`. It keeps the
+      ;; application (marked :admitted) rather than deleting it, and the
+      ;; new operator starts at 0 committed hours -- an admitted person
+      ;; has agreed to be assignable, not to any particular assignment.
+      :candidate-admit        (let [{:keys [candidate-id certifications weekly-capacity-hours]} value
+                                    c (get-in @a [:candidates candidate-id])]
+                                (swap! a assoc-in [:candidates candidate-id :status] :admitted)
+                                (swap! a assoc-in [:operators candidate-id]
+                                       {:id candidate-id
+                                        :name (:handle c)
+                                        :certifications (or certifications #{})
+                                        :weekly-capacity-hours (or weekly-capacity-hours
+                                                                   (:weekly-capacity-hours c))
+                                        :committed-hours 0}))
+      :candidate-decline      (swap! a update-in [:candidates (:candidate-id value)]
+                                     merge {:status :declined :decline-reason (:reason value)})
       :dispute-apply          (swap! a update-in [:assignments (first path)] merge (:patch value))
       nil)
     s)
@@ -111,12 +169,14 @@
   (with-operators [s os]   (when (seq os) (swap! a assoc :operators os)) s)
   (with-assignments [s as] (when (seq as) (swap! a assoc :assignments as)) s)
   (with-screenings [s scs] (when (seq scs) (swap! a assoc :screenings scs)) s)
+  (with-candidates [s cs]  (when (seq cs) (swap! a assoc :candidates cs)) s)
   (with-contracts [s cts]  (when (seq cts) (swap! a assoc :contracts cts)) s))
 
 (defn seed-db
   "A MemStore seeded with the demo data. The deterministic default."
   []
-  (->MemStore (atom (assoc (demo-data) :assignments {} :screenings {} :ledger []))))
+  (->MemStore (atom (merge {:assignments {} :screenings {} :candidates {} :ledger []}
+                           (demo-data)))))
 
 ;; ───────────────────────── DatomicStore (langchain.db) ─────────────────
 
@@ -129,6 +189,7 @@
    :operator/id          {:db/unique :db.unique/identity}
    :assignment/id        {:db/unique :db.unique/identity}
    :screening/operator-id {:db/unique :db.unique/identity}
+   :candidate/id         {:db/unique :db.unique/identity}
    :contract/tenant      {:db/unique :db.unique/identity}
    :ledger/seq           {:db/unique :db.unique/identity}})
 
@@ -195,6 +256,34 @@
 (def ^:private assignment-pull
   [:assignment/id :assignment/task-id :assignment/operator-id :assignment/status])
 
+(defn- candidate->tx [{:keys [id handle claimed-certifications weekly-capacity-hours
+                             remote? contact-ref referral-source status decline-reason]}]
+  (cond-> {:candidate/id id}
+    handle                  (assoc :candidate/handle handle)
+    true                    (assoc :candidate/claimed-certifications (enc (or claimed-certifications #{})))
+    weekly-capacity-hours   (assoc :candidate/weekly-capacity-hours weekly-capacity-hours)
+    (some? remote?)         (assoc :candidate/remote remote?)
+    contact-ref             (assoc :candidate/contact-ref contact-ref)
+    referral-source         (assoc :candidate/referral-source referral-source)
+    status                  (assoc :candidate/status status)
+    decline-reason          (assoc :candidate/decline-reason decline-reason)))
+
+(defn- pull->candidate [m]
+  (when (:candidate/id m)
+    {:id (:candidate/id m) :handle (:candidate/handle m)
+     :claimed-certifications (or (dec* (:candidate/claimed-certifications m)) #{})
+     :weekly-capacity-hours (:candidate/weekly-capacity-hours m)
+     :remote? (:candidate/remote m)
+     :contact-ref (:candidate/contact-ref m)
+     :referral-source (:candidate/referral-source m)
+     :status (:candidate/status m)
+     :decline-reason (:candidate/decline-reason m)}))
+
+(def ^:private candidate-pull
+  [:candidate/id :candidate/handle :candidate/claimed-certifications
+   :candidate/weekly-capacity-hours :candidate/remote :candidate/contact-ref
+   :candidate/referral-source :candidate/status :candidate/decline-reason])
+
 (defn- contract->tx [{:keys [tenant tier active? purpose]}]
   {:contract/tenant tenant :contract/tier tier :contract/active active? :contract/purpose purpose})
 
@@ -227,6 +316,11 @@
          (sort-by :id)))
   (screening-of [_ operator-id]
     (pull->screening (d/pull (d/db conn) screening-pull [:screening/operator-id operator-id])))
+  (candidate [_ id] (pull->candidate (d/pull (d/db conn) candidate-pull [:candidate/id id])))
+  (all-candidates [_]
+    (->> (d/q '[:find [?id ...] :where [?e :candidate/id ?id]] (d/db conn))
+         (map #(pull->candidate (d/pull (d/db conn) candidate-pull [:candidate/id %])))
+         (sort-by :id)))
   (contract [_ tenant] (pull->contract (d/pull (d/db conn) contract-pull [:contract/tenant tenant])))
   (ledger [_]
     (->> (d/q '[:find ?s ?f :where [?e :ledger/seq ?s] [?e :ledger/fact ?f]] (d/db conn))
@@ -241,6 +335,20 @@
                                      (d/transact! conn [(operator->tx (update op :committed-hours
                                                                                (fnil + 0) (:estimated-hours t 0)))])))
       :screening-verdict-set  (d/transact! conn [(screening->tx value)])
+      :candidate-upsert       (d/transact! conn [(candidate->tx value)])
+      :candidate-admit        (let [{:keys [candidate-id certifications weekly-capacity-hours]} value
+                                    c (candidate s candidate-id)]
+                                (d/transact! conn [(candidate->tx (assoc c :status :admitted))
+                                                   (operator->tx
+                                                    {:id candidate-id
+                                                     :name (:handle c)
+                                                     :certifications (or certifications #{})
+                                                     :weekly-capacity-hours (or weekly-capacity-hours
+                                                                                (:weekly-capacity-hours c))
+                                                     :committed-hours 0})]))
+      :candidate-decline      (let [c (candidate s (:candidate-id value))]
+                                (d/transact! conn [(candidate->tx (merge c {:status :declined
+                                                                            :decline-reason (:reason value)}))]))
       :dispute-apply
       (d/transact! conn [(assignment->tx (merge (assignment s (first path)) (:patch value)))])
       nil)
@@ -256,6 +364,8 @@
     (when (seq as) (d/transact! conn (mapv assignment->tx (vals as)))) s)
   (with-screenings [s scs]
     (when (seq scs) (d/transact! conn (mapv screening->tx (vals scs)))) s)
+  (with-candidates [s cs]
+    (when (seq cs) (d/transact! conn (mapv candidate->tx (vals cs)))) s)
   (with-contracts [s cts]
     (when (seq cts) (d/transact! conn (mapv contract->tx (vals cts)))) s))
 
@@ -263,10 +373,11 @@
   "A DatomicStore (langchain.db backend) seeded from `data`; empty when
   omitted."
   ([] (datomic-store {}))
-  ([{:keys [tasks operators assignments screenings contracts]}]
+  ([{:keys [tasks operators assignments screenings candidates contracts]}]
    (let [s (->DatomicStore (d/create-conn schema))]
      (-> s (with-tasks tasks) (with-operators operators)
          (with-assignments assignments) (with-screenings screenings)
+         (with-candidates candidates)
          (with-contracts contracts)))))
 
 (defn datomic-seed-db

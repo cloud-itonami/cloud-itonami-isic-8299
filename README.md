@@ -108,19 +108,62 @@ request + injected role/tenant/phase context
 **Single invariant**: TaskRouter-LLM never assigns, discloses, or resolves
 a dispute the RoutingGovernor would reject.
 
+## Recruiting into the operator pool
+
+This actor dispatches work to **contracted** operators. Until now the pool
+could only be seeded — there was no governed way for someone to apply and
+be admitted, which made "the pool exists" an assumption rather than
+something the actor could account for. Three ops close that gap:
+
+| op | who may run it | what it does |
+|---|---|---|
+| `:operator/apply` | dispatcher, ops-manager | records that someone applied. **Does not** make them assignable. |
+| `:operator/admit` | ops-manager only | creates the operator record from the application. |
+| `:operator/decline` | ops-manager only | marks the application declined, keeping it on file. |
+
+Four properties are structural, not procedural:
+
+- **An applicant is not in the pool.** Candidates live in their own
+  container, so `operator`/`all-operators` cannot return someone who was
+  never admitted — an assignment aimed at an applicant is a HARD
+  `:unknown-operator` hold, not a filter someone must remember to call.
+- **Admission is always a human's decision.** `:operator/admit` and
+  `:operator/decline` are absent from every phase's `:auto` set and always
+  escalate in the governor, at any confidence, at every phase — the same
+  treatment `:dispute/request` gets. The actor prepares, governs and
+  records the decision; a person makes it.
+- **No applicant PII.** A candidate carries a self-chosen `:handle` and an
+  opaque `:contact-ref` pointing at the public conversation (e.g. a GitHub
+  issue). There is no schema field for a legal name, address, phone,
+  email, date of birth, national id or bank account, and the scope-gate
+  rejects a proposal that carries one anyway.
+- **Claims are checked against reality, not vibes.** A certification class
+  outside `bizsupport.facts`' catalog is rejected (the same closed set
+  assignment enforces), as is a weekly-capacity claim that does not fit in
+  a week. Duplicate applications, re-admission and re-declining are
+  rejected by the lifecycle gate.
+
+What this does **not** do, deliberately: sign a contract with the admitted
+person, or pay them. Admission means "this person may now be offered
+tasks". Contract execution and remuneration are outside every actor in
+this fleet (see the disclaimer below).
+
 ## Run
 
 ```bash
 clojure -M:dev:test   # governor contract · store parity · phases · facts
-clojure -M:dev:run    # 8-operation demo through one OperationActor
+clojure -M:dev:run    # 13-operation demo through one OperationActor
 clojure -M:lint
 ```
 
 ## Non-Negotiables
 
-- Do not commit real client or operator personal data.
+- Do not commit real client, operator or applicant personal data.
 - Do not add a schema field for raw client PII (SSN, payment card, home
-  address, financial account).
+  address, financial account) or applicant PII (legal name, address,
+  phone, email, date of birth, national id, bank account).
+- Do not make `:operator/admit` or `:operator/decline` auto-committable at
+  any phase, and do not add a confidence threshold that skips the human.
 - Do not bypass the RoutingGovernor for production assignment or
   disclosures.
 - Do not serve a disclosure without an active, registered contract.

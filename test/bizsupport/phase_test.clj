@@ -76,3 +76,51 @@
       (let [[_ res] (run ph dispute-req manager)]
         (is (not= :commit (get-in res [:state :disposition]))
             (str "phase " ph " must not auto-commit a dispute"))))))
+
+;; ───────────── operator-pool recruitment across the phases ─────────────
+
+(def ^:private apply-req
+  {:op :operator/apply :subject "cand-500" :candidate-id "cand-500"
+   :handle "phase-test-applicant" :claimed-certifications #{:soc2}
+   :weekly-capacity-hours 10 :remote? true
+   :contact-ref "gh-issue:example/repo#1" :referral-source :public-board})
+
+(def ^:private admit-req
+  {:op :operator/admit :subject "cand-100" :candidate-id "cand-100"})
+
+(def ^:private decline-req
+  {:op :operator/decline :subject "cand-100" :candidate-id "cand-100" :reason :out-of-scope})
+
+(deftest phase0-and-1-gate-the-application-record
+  (testing "phase 0 disables it entirely"
+    (let [[s res] (run 0 apply-req dispatcher)]
+      (is (= :hold (get-in res [:state :disposition])))
+      (is (nil? (store/candidate s "cand-500")))))
+  (testing "phase 1 records applications but only through a human"
+    (let [[s res] (run 1 apply-req dispatcher)]
+      (is (= :interrupted (:status res)))
+      (is (nil? (store/candidate s "cand-500")) "nothing written before approval"))))
+
+(deftest phase3-may-auto-record-an-application
+  (let [[s res] (run 3 apply-req dispatcher)]
+    (is (= :commit (get-in res [:state :disposition])))
+    (is (= :candidate (:status (store/candidate s "cand-500"))))
+    (is (nil? (store/operator s "cand-500")) "recording ≠ admitting")))
+
+(deftest admission-and-decline-never-auto-commit-at-any-phase
+  (doseq [[label req] [["admit" admit-req] ["decline" decline-req]]]
+    (testing label
+      (doseq [ph [0 1 2 3]]
+        (let [[s res] (run ph req manager)]
+          (is (not= :commit (get-in res [:state :disposition]))
+              (str "phase " ph " must not auto-" label))
+          (is (nil? (store/operator s "cand-100"))
+              (str "phase " ph ": nobody joins the pool without a human"))
+          (is (= :candidate (:status (store/candidate s "cand-100")))
+              (str "phase " ph ": the application stays open")))))))
+
+(deftest phases-0-and-1-disable-admission-outright
+  (doseq [ph [0 1]]
+    (let [[_ res] (run ph admit-req manager)]
+      (is (= :hold (get-in res [:state :disposition]))
+          (str "phase " ph " has no admission authority at all")))))
