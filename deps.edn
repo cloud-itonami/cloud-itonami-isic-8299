@@ -3,7 +3,17 @@
  ;; .cljc → portable to JVM / SCI / ClojureScript / GraalVM). Both live in
  ;; the kotoba-lang org of this workspace (kotoba wasm → clojurewasm →
  ;; ClojureScript → nbb runtime priority, CLAUDE.md).
- :deps {io.github.kotoba-lang/langgraph
+ :deps {
+        io.github.kotoba-lang/jp-go-digital-design-system
+        {:git/url "https://github.com/kotoba-lang/jp-go-digital-design-system"
+         :git/sha "f9ef46980869cc0bedddc3c552ccfd7add7cffe0"}
+        ;; html/css を top-level で git 座標に固定する。推移依存(:local/root)と
+        ;; jp-go-dds(:git/sha)で座標型が違うと tools.deps が版を比較できない。
+        io.github.kotoba-lang/html
+        {:git/url "https://github.com/kotoba-lang/html" :git/sha "00a4c2ad43dde3df9d54b658961143c53945a379"}
+        io.github.kotoba-lang/css
+        {:git/url "https://github.com/kotoba-lang/css" :git/sha "6eda5ee28ec177b9e09fdbee92c55a050b18cf7d"}
+io.github.kotoba-lang/langgraph
         {:local/root "../../kotoba-lang/langgraph"}
         ;; optional: bizsupport.screening's cross-reference into
         ;; cloud-itonami-isic-8291 (com-junkawasaki/root superproject
