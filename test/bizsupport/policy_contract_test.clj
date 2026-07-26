@@ -8,6 +8,7 @@
     leaves exactly one ledger fact."
   (:require [clojure.test :refer [deftest is testing]]
             [langgraph.graph :as g]
+            [bizsupport.llm :as llm]
             [bizsupport.store :as store]
             [bizsupport.operation :as op]))
 
@@ -149,3 +150,148 @@
                dispatcher)
       (is (= 2 (count (store/ledger db)))
           "one commit + one hold, both recorded"))))
+
+;; ───────────────── operator-pool recruitment governor contract ─────────────
+;; The invariant: this actor can PREPARE, GOVERN and RECORD who joins the
+;; operator pool, but never decides it. Every admission/decline reaches a
+;; human at every phase, and the applicant-side checks are HARD.
+
+(defn- apply-request [overrides]
+  (merge {:op :operator/apply :subject "cand-900" :candidate-id "cand-900"
+          :handle "test-applicant" :claimed-certifications #{:soc2}
+          :weekly-capacity-hours 10 :remote? true
+          :contact-ref "gh-issue:example/repo#1" :referral-source :public-board}
+         overrides))
+
+(deftest application-is-recorded-but-never-lands-in-the-operator-pool
+  (let [[db actor] (fresh)
+        res (exec-op actor "r1" (apply-request {}) dispatcher)]
+    (is (= :commit (get-in res [:state :disposition])))
+    (is (= :candidate (:status (store/candidate db "cand-900"))))
+    (is (nil? (store/operator db "cand-900"))
+        "recording an application must not make the person assignable")))
+
+(deftest admission-always-reaches-a-human-even-at-phase-3-and-full-confidence
+  (let [[db actor] (fresh)
+        res (exec-op actor "r2" {:op :operator/admit :subject "cand-100"
+                                 :candidate-id "cand-100"} manager)]
+    (is (= :interrupted (:status res)) "admission pauses for a human")
+    (is (nil? (store/operator db "cand-100")) "nobody joins the pool before sign-off")
+    (let [resumed (g/run* actor {:approval {:status :approved :by "om-1"}}
+                          {:thread-id "r2" :resume? true})]
+      (is (= :commit (get-in resumed [:state :disposition])))
+      (is (some? (store/operator db "cand-100")) "admitted only after the human approved")
+      (is (= 0 (:committed-hours (store/operator db "cand-100")))))))
+
+(deftest decline-also-always-reaches-a-human
+  (let [[db actor] (fresh)
+        res (exec-op actor "r3" {:op :operator/decline :subject "cand-100"
+                                 :candidate-id "cand-100" :reason :out-of-scope} manager)]
+    (is (= :interrupted (:status res)))
+    (is (= :candidate (:status (store/candidate db "cand-100")))
+        "no state change before the human decides")))
+
+(deftest rejected-admission-leaves-the-application-open
+  (let [[db actor] (fresh)]
+    (exec-op actor "r4" {:op :operator/admit :subject "cand-100" :candidate-id "cand-100"} manager)
+    (let [resumed (g/run* actor {:approval {:status :rejected :by "om-1"}}
+                          {:thread-id "r4" :resume? true})]
+      (is (= :hold (get-in resumed [:state :disposition])))
+      (is (nil? (store/operator db "cand-100")))
+      (is (= :candidate (:status (store/candidate db "cand-100")))))))
+
+(deftest out-of-catalog-certification-claim-is-a-hard-hold
+  (let [[db actor] (fresh)
+        res (exec-op actor "r5" (apply-request {:candidate-id "cand-901" :subject "cand-901"
+                                                :claimed-certifications #{:self-declared}})
+                     dispatcher)]
+    (is (= :hold (get-in res [:state :disposition])))
+    (is (some #(= :certification-claim-gate (:rule %))
+              (get-in res [:state :verdict :violations])))
+    (is (nil? (store/candidate db "cand-901")))))
+
+(deftest impossible-capacity-claim-is-a-hard-hold
+  (let [[_ actor] (fresh)]
+    (doseq [[label hours] [["zero" 0] ["negative" -5] ["more hours than a week has" 200]
+                           ["not a number" "ろくじかん"]]]
+      (testing label
+        (let [res (exec-op actor (str "r6-" label)
+                           (apply-request {:candidate-id (str "cand-902-" label)
+                                           :subject (str "cand-902-" label)
+                                           :weekly-capacity-hours hours})
+                           dispatcher)]
+          (is (= :hold (get-in res [:state :disposition])))
+          (is (some #(= :capacity-claim-gate (:rule %))
+                    (get-in res [:state :verdict :violations]))))))))
+
+(deftest applicant-pii-in-a-proposal-is-a-hard-hold
+  ;; The schema has no field for a legal name; this proves the governor
+  ;; also refuses one an advisor tries to smuggle in anyway.
+  (let [pii-advisor (reify llm/Advisor
+                      (-advise [_ _ _]
+                        {:summary "x" :rationale "y" :cites [] :effect :candidate-upsert
+                         :value {:id "cand-903" :handle "h" :claimed-certifications #{:soc2}
+                                 :weekly-capacity-hours 10
+                                 :applicant-legal-name "実名 太郎"}
+                         :confidence 0.95}))
+        db (store/seed-db)
+        actor (op/build db {:advisor pii-advisor})
+        res (exec-op actor "r7" (apply-request {:candidate-id "cand-903" :subject "cand-903"})
+                     dispatcher)]
+    (is (= :hold (get-in res [:state :disposition])))
+    (is (some #(= :scope-gate (:rule %)) (get-in res [:state :verdict :violations])))
+    (is (nil? (store/candidate db "cand-903")))))
+
+(deftest duplicate-application-and-double-admission-are-hard-holds
+  (let [[db actor] (fresh)]
+    (testing "an id already in the pool cannot be re-applied"
+      (let [res (exec-op actor "r8" (apply-request {:candidate-id "op-100" :subject "op-100"})
+                         dispatcher)]
+        (is (= :hold (get-in res [:state :disposition])))
+        (is (some #(= :candidate-lifecycle (:rule %)) (get-in res [:state :verdict :violations])))
+        (is (= 30 (:committed-hours (store/operator db "op-100")))
+            "the pool member's own record was not merged over")))
+    (testing "an application already on file cannot be re-applied"
+      (let [res (exec-op actor "r9" (apply-request {:candidate-id "cand-100" :subject "cand-100"})
+                         dispatcher)]
+        (is (= :hold (get-in res [:state :disposition])))))
+    (testing "an already-admitted application cannot be admitted again"
+      (store/commit-record! db {:effect :candidate-admit
+                                :value {:candidate-id "cand-100" :certifications #{:soc2}
+                                        :weekly-capacity-hours 12}})
+      (let [res (exec-op actor "r10" {:op :operator/admit :subject "cand-100"
+                                      :candidate-id "cand-100"} manager)]
+        (is (= :hold (get-in res [:state :disposition])))))))
+
+(deftest admission-of-a-sanctions-hit-is-a-hard-hold-no-human-override
+  (let [db (store/seed-db)
+        _  (store/commit-record! db {:effect :screening-verdict-set
+                                     :value {:operator-id "cand-100" :verdict :hit}})
+        actor (op/build db)
+        res (exec-op actor "r11" {:op :operator/admit :subject "cand-100"
+                                  :candidate-id "cand-100"} manager)]
+    (is (= :hold (get-in res [:state :disposition]))
+        "a screening hit holds BEFORE any human is asked -- not escalated for approval")
+    (is (some #(= :sanctions-screening-gate (:rule %)) (get-in res [:state :verdict :violations])))
+    (is (nil? (store/operator db "cand-100")))))
+
+(deftest dispatcher-cannot-admit
+  (let [[_ actor] (fresh)
+        res (exec-op actor "r12" {:op :operator/admit :subject "cand-100"
+                                  :candidate-id "cand-100"} dispatcher)]
+    (is (= :hold (get-in res [:state :disposition])))
+    (is (some #(= :rbac (:rule %)) (get-in res [:state :verdict :violations])))))
+
+(deftest assignment-to-an-unadmitted-applicant-is-a-hard-hold
+  (let [db (store/seed-db)
+        ;; a zero-hour task would otherwise slip past the capacity gate
+        _ (store/commit-record! db {:effect :task-upsert
+                                    :value {:id "tk-zero" :client-id "cl-1" :title "0h"
+                                            :required-certifications #{} :estimated-hours 0
+                                            :value-tier :standard :status :open}})
+        actor (op/build db)
+        res (exec-op actor "r13" {:op :task/assign :subject "tk-zero"
+                                  :task-id "tk-zero" :operator-id "cand-100"} dispatcher)]
+    (is (= :hold (get-in res [:state :disposition])))
+    (is (some #(= :unknown-operator (:rule %)) (get-in res [:state :verdict :violations])))
+    (is (empty? (store/assignments-of-operator db "cand-100")))))

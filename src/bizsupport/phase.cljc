@@ -9,38 +9,48 @@
 
     Phase 0  read-only        — no writes at all. `:disclosure/query` only
                                 (still governor-gated).
-    Phase 1  assisted-intake  — `:task/decompose` allowed, every write
-                                needs human approval.
-    Phase 2  + assignment     — adds `:task/assign` and `:dispute/request`
+    Phase 1  assisted-intake  — `:task/decompose` and `:operator/apply`
+                                (recording that someone applied) allowed,
+                                every write needs human approval.
+    Phase 2  + assignment     — adds `:task/assign`, `:dispute/request`
+                                and the admission decisions
+                                `:operator/admit`/`:operator/decline`
                                 (still approval-only).
     Phase 3  supervised auto  — governor-clean, high-confidence
-                                `:task/decompose`/`:task/assign` may
-                                auto-commit.
+                                `:task/decompose`/`:task/assign`/
+                                `:operator/apply` may auto-commit.
 
-  `:dispute/request` is deliberately NEVER a member of any phase's `:auto`
-  set, at any phase — a client/operator dispute always reaches a human,
-  independent of the RoutingGovernor's own always-escalate check on the
-  same op.
+  `:dispute/request`, `:operator/admit` and `:operator/decline` are
+  deliberately NEVER members of any phase's `:auto` set, at any phase — a
+  client/operator dispute always reaches a human, and so does every
+  decision about whether a real person joins this operator pool or is
+  turned down, independent of the RoutingGovernor's own always-escalate
+  checks on the same ops. `:operator/apply` is auto-eligible at phase 3
+  because recording that someone applied is not a decision about them.
 
   `gate` runs AFTER `policy/check`, taking the governor disposition
   (:commit | :escalate | :hold) and returning the phase-adjusted
   disposition plus a reason when the phase changed it.")
 
 (def read-ops  #{:disclosure/query})
-(def write-ops #{:task/decompose :task/assign :operator/screen :dispute/request})
+(def write-ops #{:task/decompose :task/assign :operator/screen :dispute/request
+                 :operator/apply :operator/admit :operator/decline})
 
 (def phases
   "phase → {:label .. :writes <ops allowed to write> :auto <ops allowed to
-  auto-commit when governor-clean>}. `:dispute/request` is intentionally
-  absent from every phase's `:auto` set."
+  auto-commit when governor-clean>}. `:dispute/request`,
+  `:operator/admit` and `:operator/decline` are intentionally absent from
+  every phase's `:auto` set."
   {0 {:label "read-only"       :writes #{}
                                 :auto #{}}
-   1 {:label "assisted-intake" :writes #{:task/decompose}
+   1 {:label "assisted-intake" :writes #{:task/decompose :operator/apply}
                                 :auto #{}}
-   2 {:label "assisted-assign" :writes #{:task/decompose :task/assign :operator/screen :dispute/request}
+   2 {:label "assisted-assign" :writes #{:task/decompose :task/assign :operator/screen :dispute/request
+                                         :operator/apply :operator/admit :operator/decline}
                                 :auto #{}}
-   3 {:label "supervised-auto" :writes #{:task/decompose :task/assign :operator/screen :dispute/request}
-                                :auto #{:task/decompose :task/assign :operator/screen}}})
+   3 {:label "supervised-auto" :writes #{:task/decompose :task/assign :operator/screen :dispute/request
+                                         :operator/apply :operator/admit :operator/decline}
+                                :auto #{:task/decompose :task/assign :operator/screen :operator/apply}}})
 
 (def default-phase
   "The phase used when `context` carries no :phase at all

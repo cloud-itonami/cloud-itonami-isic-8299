@@ -93,6 +93,7 @@
                         :op (:op request) :subject (:subject request)
                         :reason (or reason
                                     (cond (:dispute? verdict) :dispute
+                                          (:admission? verdict) :admission-decision
                                           (:high-value? verdict) :high-value-task
                                           :else :low-confidence))
                         :phase ph

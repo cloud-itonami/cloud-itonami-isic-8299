@@ -141,6 +141,73 @@
    :value     {:patch {disputed-field claim}}
    :confidence 0.5})
 
+;; ───────────────────── operator-pool recruitment ─────────────────────
+;; The advisor SHAPES an application/admission record; it never decides
+;; whether the person joins. `bizsupport.policy` rejects an out-of-catalog
+;; certification claim, an impossible capacity claim, a duplicate or
+;; already-resolved application and a screening `:hit` outright, and routes
+;; every admission/decline to a human at every phase. So these proposals
+;; are deliberately plain restatements of what the applicant said, with no
+;; eligibility judgment of their own.
+
+(defn- propose-apply
+  "Record that someone applied to join the operator pool. `:value` is the
+  candidate record verbatim (handle + claimed certifications + claimed
+  capacity + an opaque contact-ref) — no legal name, address, phone,
+  email, date of birth, national id or bank account: there is no field for
+  those, and the scope-gate rejects a proposal carrying one."
+  [{:keys [candidate-id handle claimed-certifications weekly-capacity-hours
+           remote? contact-ref referral-source]}]
+  {:summary   (str handle " からオペレータプールへの応募を受理(審査前)")
+   :rationale (str "申告: 証明区分 " (vec (or claimed-certifications #{}))
+                   " / 週間キャパシティ " weekly-capacity-hours "h"
+                   " / 経路 " referral-source
+                   "。適格性の判定は governor と人間が行う。")
+   :cites     [:application]
+   :effect    :candidate-upsert
+   :value     {:id candidate-id :handle handle
+               :claimed-certifications (or claimed-certifications #{})
+               :weekly-capacity-hours weekly-capacity-hours
+               :remote? remote?
+               :contact-ref contact-ref
+               :referral-source referral-source
+               :status :candidate}
+   :confidence 0.8})
+
+(defn- propose-admit
+  "Draft an admission into the assignable pool. ALWAYS escalates to a
+  human (`bizsupport.policy/admission-ops`) — the confidence below is not
+  what decides it, and no phase makes this auto-committable."
+  [db {:keys [candidate-id certifications weekly-capacity-hours]}]
+  (let [c (when db (store/candidate db candidate-id))
+        certs (or certifications (:claimed-certifications c) #{})
+        hours (or weekly-capacity-hours (:weekly-capacity-hours c))
+        sc    (when db (store/screening-of db candidate-id))]
+    {:summary   (str (or (:handle c) candidate-id) " をオペレータプールへ受入(要人手承認)")
+     :rationale (str "証明区分 " (vec certs) " / 週間キャパシティ " hours "h"
+                     "。スクリーニング: "
+                     (if sc (str (:verdict sc)) "未実施(人間が実施の要否を判断)")
+                     "。受入の可否はこの advisor ではなく人間が決める。")
+     :cites     [:application (if sc :screening :screening-absent)]
+     :effect    :candidate-admit
+     :value     {:candidate-id candidate-id
+                 :certifications certs
+                 :weekly-capacity-hours hours}
+     :confidence 0.5}))
+
+(defn- propose-decline
+  "Draft a decline. Also always escalates — turning a real applicant down
+  is a decision about a person, not a routing optimization."
+  [db {:keys [candidate-id reason]}]
+  (let [c (when db (store/candidate db candidate-id))]
+    {:summary   (str (or (:handle c) candidate-id) " の応募を不採用とするドラフト(要人手承認)")
+     :rationale (str "理由(ドラフト): " (or reason "未記載")
+                     "。応募記録は削除せず :declined として残す。")
+     :cites     [:application]
+     :effect    :candidate-decline
+     :value     {:candidate-id candidate-id :reason reason}
+     :confidence 0.5}))
+
 (def default-corporate-intel-screen
   "No-op corporate-intelligence cross-reference: always 'nothing on file'.
   This is the default so every existing caller of `infer`/`mock-advisor`
@@ -162,6 +229,9 @@
      :task/decompose      (propose-decompose request)
      :task/assign          (propose-assign request)
      :operator/screen       (propose-screen db request screen-fn)
+     :operator/apply        (propose-apply request)
+     :operator/admit        (propose-admit db request)
+     :operator/decline      (propose-decline db request)
      :disclosure/query     (propose-disclosure request)
      :dispute/request       (propose-dispute request)
      {:summary "未対応の操作" :rationale (str op) :cites [] :effect :noop :confidence 0.0})))
@@ -195,12 +265,18 @@
        "説明や前置きは一切書かず、EDN だけを出力します。\n"
        "キー: :summary(人向けドラフト) :rationale(根拠) "
        ":cites(使った事実キーのベクタ) "
-       ":effect(:task-upsert|:assignment-upsert|:screening-verdict-set|:disclosure-serve|:dispute-apply) "
+       ":effect(:task-upsert|:assignment-upsert|:screening-verdict-set|:candidate-upsert|"
+       ":candidate-admit|:candidate-decline|:disclosure-serve|:dispute-apply) "
        ":value(該当マップ) :confidence(0..1)。\n"
        "重要: クライアントの個人識別情報(SSN・決済カード・住所・口座)に"
        "関する情報は一切扱ってはいけません(スキーマにそのフィールドは存在しません)。"
        "operator の証明区分/稼働上限の妥当性判断はあなたの責務ではありません"
-       "(governor が判定します)。"))
+       "(governor が判定します)。"
+       "オペレータプールへの受入/不採用(:candidate-admit / :candidate-decline)は"
+       "人間が決めます。あなたは応募内容を記録・整形するだけで、"
+       "適格・不適格の結論を出してはいけません。"
+       "応募者の実名・住所・電話番号・メール・生年月日・身分証番号・銀行口座は"
+       "スキーマに存在しません。書いてはいけません。"))
 
 (defn- parse-proposal
   "Parse the model's EDN proposal defensively. Any parse/shape failure yields

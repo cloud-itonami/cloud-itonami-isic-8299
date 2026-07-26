@@ -1,7 +1,8 @@
 (ns bizsupport.sim
-  "Demo runner: push eight representative operations through one
+  "Demo runner: push thirteen representative operations through one
   OperationActor and watch the RoutingGovernor + approval workflow earn
-  the TaskRouter-LLM the right to assign, disclose or resolve a dispute.
+  the TaskRouter-LLM the right to assign, disclose, resolve a dispute, or
+  let a real person into the operator pool.
 
     op1  タスク分解(個人情報なし・正当)                    → commit
     op2  資格保持済み operator への割当(正当)              → commit
@@ -12,6 +13,11 @@
     op6a 開示クエリが未契約 tenant から                     → licensed-disclosure REJECT → hold
     op7  高額(:high-value)タスクへの割当(他は正常)          → 人間承認へ escalate → approve → commit
     op8  紛争申立て(どの phase でも常に人間レビュー)        → escalate → approve → commit
+    op9  プール応募の受理(記録のみ、受入ではない)           → commit(プールには入らない)
+    op10 カタログ外の証明区分を申告した応募                 → certification-claim-gate REJECT → hold
+    op11 1週間に収まらないキャパシティ申告(200h)            → capacity-claim-gate REJECT → hold
+    op12 プールへの受入(phase3・高信頼でも人間が署名)        → escalate → approve → commit
+    op13 受入済みの応募を再度受入                          → candidate-lifecycle REJECT → hold
 
   Run: clojure -M:dev:run"
   (:require [langgraph.graph :as g]
@@ -102,6 +108,44 @@
     (line "\nop8  紛争申立て — 成果物品質への異議(どの phase でも常に人間レビュー)")
     (run-op! actor "op8"
              {:op :dispute/request :subject "tk-100-op-100" :disputed-field :status :claim :disputed}
+             manager true)
+
+    (line "\nop9  プールへの応募を受理(記録のみ — 受入判断ではない)")
+    (run-op! actor "op9"
+             {:op :operator/apply :subject "cand-200" :candidate-id "cand-200"
+              :handle "minato (demo)" :claimed-certifications #{:iso-27001}
+              :weekly-capacity-hours 15 :remote? true
+              :contact-ref "gh-issue:cloud-itonami/cloud-itonami-isic-6399#0"
+              :referral-source :public-board}
+             dispatcher true)
+    (line "   応募者はプールに入っていない(operator: "
+          (pr-str (store/operator db "cand-200")) ")")
+
+    (line "\nop10 カタログ外の証明区分を申告した応募(:self-declared)")
+    (run-op! actor "op10"
+             {:op :operator/apply :subject "cand-300" :candidate-id "cand-300"
+              :handle "self-declared (demo)" :claimed-certifications #{:self-declared}
+              :weekly-capacity-hours 10 :remote? true
+              :contact-ref "gh-issue:example/repo#0" :referral-source :public-board}
+             dispatcher true)
+
+    (line "\nop11 1週間に収まらないキャパシティ申告(200h)")
+    (run-op! actor "op11"
+             {:op :operator/apply :subject "cand-400" :candidate-id "cand-400"
+              :handle "impossible (demo)" :claimed-certifications #{:soc2}
+              :weekly-capacity-hours 200 :remote? true
+              :contact-ref "gh-issue:example/repo#0" :referral-source :public-board}
+             dispatcher true)
+
+    (line "\nop12 プールへの受入 — phase 3・高信頼でも必ず人間が署名する")
+    (run-op! actor "op12"
+             {:op :operator/admit :subject "cand-100" :candidate-id "cand-100"}
+             manager true)
+    (line "   受入後の operator: " (pr-str (store/operator db "cand-100")))
+
+    (line "\nop13 受入済みの応募を再度受入しようとする(committed-hours のリセット防止)")
+    (run-op! actor "op13"
+             {:op :operator/admit :subject "cand-100" :candidate-id "cand-100"}
              manager true)
 
     (line "\n── 開示(governor が承認した tier/basic 列のみ) ──")

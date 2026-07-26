@@ -61,3 +61,59 @@
     (is (= [] (store/ledger s)))
     (store/with-tasks s {"x" {:id "x" :title "X"}})
     (is (= "X" (:title (store/task s "x"))))))
+
+;; ───────────────── operator-pool recruitment (candidates) ─────────────────
+;; A candidate lives in its OWN container, never in :operators -- that is
+;; what makes "an assignment can never reach someone who has not been
+;; admitted" structural instead of a filter every caller must remember.
+
+(deftest candidate-read-parity
+  (doseq [[label s] (backends)]
+    (testing label
+      (is (= "kaede (demo)" (:handle (store/candidate s "cand-100"))))
+      (is (= #{:soc2} (:claimed-certifications (store/candidate s "cand-100"))))
+      (is (= :candidate (:status (store/candidate s "cand-100"))))
+      (is (= 1 (count (store/all-candidates s))))
+      (is (nil? (store/operator s "cand-100"))
+          "an applicant is NOT in the operator pool")
+      (is (not-any? #(= "cand-100" (:id %)) (store/all-operators s))
+          "all-operators never returns an applicant"))))
+
+(deftest admission-creates-the-operator-and-keeps-the-application
+  (doseq [[label s] (backends)]
+    (testing label
+      (store/commit-record! s {:effect :candidate-admit
+                               :value {:candidate-id "cand-100"
+                                       :certifications #{:soc2}
+                                       :weekly-capacity-hours 12}})
+      (let [o (store/operator s "cand-100")
+            c (store/candidate s "cand-100")]
+        (is (= "kaede (demo)" (:name o)) "operator inherits the applicant's own handle")
+        (is (= #{:soc2} (:certifications o)))
+        (is (= 12 (:weekly-capacity-hours o)))
+        (is (= 0 (:committed-hours o))
+            "admission makes someone assignable, not assigned")
+        (is (= :admitted (:status c)) "the application is retained, marked admitted")))))
+
+(deftest decline-retains-the-application-and-creates-no-operator
+  (doseq [[label s] (backends)]
+    (testing label
+      (store/commit-record! s {:effect :candidate-decline
+                               :value {:candidate-id "cand-100" :reason :capacity-mismatch}})
+      (is (nil? (store/operator s "cand-100")))
+      (is (= :declined (:status (store/candidate s "cand-100"))))
+      (is (= :capacity-mismatch (:decline-reason (store/candidate s "cand-100")))))))
+
+(deftest candidate-upsert-parity
+  (doseq [[label s] (backends)]
+    (testing label
+      (store/commit-record! s {:effect :candidate-upsert
+                               :value {:id "cand-200" :handle "sora (test)"
+                                       :claimed-certifications #{:iso-27001}
+                                       :weekly-capacity-hours 8 :remote? true
+                                       :contact-ref "gh-issue:example/repo#1"
+                                       :referral-source :public-board
+                                       :status :candidate}})
+      (is (= "sora (test)" (:handle (store/candidate s "cand-200"))))
+      (is (= #{:iso-27001} (:claimed-certifications (store/candidate s "cand-200"))))
+      (is (nil? (store/operator s "cand-200"))))))
