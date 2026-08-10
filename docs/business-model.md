@@ -78,6 +78,47 @@ Operators can sell:
 | Pro tier | regulated-data clients (health/fintech) | monthly platform fee |
 | Institutional tier | enterprise BPO buyer | monthly fee + usage |
 | Fleet wholesale | other cloud-itonami operators | API metering |
+| Managed Starter | one VA/BPO agency (30–50 contracted operators, ~5 in-house coordinator seats) | ¥15,000/月 flat |
+
+**Market-anchored (2026-08-10)**: benchmarked against 5 real competitor
+products. **Only 3 of the 5 publish real numbers.** Published:
+**freee業務委託管理 (旧 pasture)** — Free ¥0/月 (1 active partner ID),
+Starter 実質¥1,980(税抜)/月〜 ＋従量課金 (annual contract), Standard
+「料金はお問い合わせください」
+(<https://www.freee.co.jp/partner-management/pricing/>); **Asana** —
+Starter ¥1,200/ユーザー/月 (annual) or ¥1,475 (monthly), Advanced ¥2,700 /
+¥3,300, Enterprise custom (<https://asana.com/ja/pricing>); **monday.com
+work management** — Basic ¥1,300/席/月, Standard ¥1,650, Pro ¥3,200 (annual,
+3-seat minimum), Enterprise custom (<https://monday.com/pricing>). At the
+assumed 5 coordinator seats that is ≈¥6,000–¥16,500/月 for the seat-priced
+tools. **Not published — this is an observation, not a gap**: **Worksuite**
+answers its own pricing page with "Every plan is a little different. Let's
+shape yours." and a demo form, no figure anywhere
+(<https://worksuite.com/pricing/>); **WorkMarket** (ADP) sells on custom
+enterprise quote only (<https://www.workmarket.com/pricing>). **The two
+products that are actually this actor's own class — freelancer/contingent
+workforce management systems — are exactly the two that disclose nothing, so
+the upper bound of this band is unmeasured. ¥15,000/月 is set from the
+seat-priced floor only, and should be revised upward if real FMS pricing
+becomes evidenced.** ¥15,000/月 sits just under monday.com Pro at 5 seats
+(¥16,000) and Asana Advanced at 5 seats (¥16,500), which is the right
+position because this actor holds neither end of the workflow: it does not
+issue purchase orders, receive invoices or move money (freee's job), and it
+is not the agency's project UI (Asana/monday's job). It is a layer on top of
+both, and what it adds is not sold by any of the 5: a regulated-data task
+can never route to an uncertified operator, a contracted operator can never
+be silently overcommitted past stated capacity, a `:hit` sanctions verdict
+is a HARD un-overridable block, and there is no schema field anywhere for a
+client's raw PII.
+
+**Subscribe (2026-08-10)**: a live Stripe Payment Link for the Managed
+Starter tier (¥15,000/月 flat) is available now —
+<https://buy.stripe.com/fZu5kEaeHbFCfdSguueEo00>. This is a no-code
+Stripe-hosted checkout on Gftd Japan 株式会社's live account; nothing in
+this repo's actor code changed. Fulfillment is manual today — after
+subscribing, contact gftdcojp to arrange managed-tenant setup. **No agency
+has subscribed to this tier yet — this is a live, working checkout with zero
+paid tenants, not a claim of existing revenue.**
 
 ## Unit Economics
 
