@@ -33,7 +33,7 @@ model — a structurally different business), and never stores a client's
 raw personal or financial identifiers — there is no field anywhere in this
 schema for one (see `docs/adr/0001-architecture.md`). Required
 certifications are limited to real, citable standards
-(`src/bizsupport/facts.cljc`: HIPAA, PCI DSS, SOC 2, GDPR data-processor
+(`src/bizsupport/facts.kotoba`: HIPAA, PCI DSS, SOC 2, GDPR data-processor
 obligations, ISO/IEC 27001) — never a fabricated certification class.
 
 ## Consuming this actor from another blueprint
@@ -45,7 +45,7 @@ is no bypass.
 
 ## Consuming cloud-itonami-isic-8291 for operator screening
 
-`src/bizsupport/screening.cljc` is an **optional** integration with
+`src/bizsupport/screening.kotoba` is an **optional** integration with
 [`cloud-itonami-isic-8291`](https://github.com/cloud-itonami/cloud-itonami-isic-8291)
 (Dossier-LLM ⊣ DisclosureGovernor corporate/compliance intelligence actor):
 before an operator is assignable to sensitive client work, `:operator/

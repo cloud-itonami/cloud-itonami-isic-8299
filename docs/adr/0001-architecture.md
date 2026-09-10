@@ -70,7 +70,7 @@ OperationActor 内で TaskRouter-LLM は *proposal*(タスク分解案・割当�
 
 ### 4. R0 の正直なスコープ(捏造禁止)
 
-出典カタログ(`src/bizsupport/facts.cljc`)は実在する5つの実定・業界標準
+出典カタログ(`src/bizsupport/facts.kotoba`)は実在する5つの実定・業界標準
 のみ(HIPAA・PCI DSS・SOC 2・GDPR データ処理者義務・ISO/IEC 27001)。
 `facts/coverage` が常に正直に現状を報告し、拡張は実在する標準の追記でのみ
 行う(捏造禁止)。

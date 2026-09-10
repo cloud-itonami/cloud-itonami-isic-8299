@@ -33,9 +33,9 @@ BizSupportSystem (root supervisor)
 ├── DispatchActor ……… operator への割当投影(:task/assign)
 │
 ├── OperationActor[op] … ★ 1操作 = 1 actor run; TaskRouter-LLM 封じ込め ★
-│     ├── TaskRouter-LLM (sealed)  proposal only(src/bizsupport/llm.cljc)
-│     ├── RoutingGovernor          INDEPENDENT ゲート(src/bizsupport/policy.cljc)
-│     ├── Committer                SSoT/台帳への書き込み(src/bizsupport/store.cljc)
+│     ├── TaskRouter-LLM (sealed)  proposal only(src/bizsupport/llm.kotoba)
+│     ├── RoutingGovernor          INDEPENDENT ゲート(src/bizsupport/policy.kotoba)
+│     ├── Committer                SSoT/台帳への書き込み(src/bizsupport/store.kotoba)
 │     └── Recorder                  監査台帳(append-only)
 │
 ├── ReviewActor ……… 人間レビュー(高額タスク割当・紛争申立ての interrupt を受ける)
@@ -54,7 +54,7 @@ BizSupportSystem (root supervisor)
 
 ## 3. OperationActor 内部(TaskRouter-LLM ラッパー)
 
-`src/bizsupport/operation.cljc` の langgraph-clj StateGraph として実装。
+`src/bizsupport/operation.kotoba` の langgraph-clj StateGraph として実装。
 **1 run = 1 操作** — 有界で監査可能、無限内部ループを持たない。
 
 ```
@@ -79,7 +79,7 @@ intake → advise → govern → decide ─┬─ commit ───────�
 
 ## 4. RoutingGovernor(独立検閲層)
 
-`src/bizsupport/policy.cljc`。LLM とは別経路で、提案を可決/拒否/escalate に
+`src/bizsupport/policy.kotoba`。LLM とは別経路で、提案を可決/拒否/escalate に
 判定する。優先順位(上が強い、HARD は人間承認でも上書き不可):
 
 1. **RBAC** — `permissions` 表で `actor-role × operation` を引く。
@@ -100,25 +100,25 @@ intake → advise → govern → decide ─┬─ commit ───────�
 
 ## 5. SSoT と監査台帳
 
-`src/bizsupport/store.cljc`。entities: `tasks`(operator PII非保持)
+`src/bizsupport/store.kotoba`。entities: `tasks`(operator PII非保持)
 `operators`(証明区分・稼働上限/コミット時間) `assignments`(task↔operator
 edge) `contracts`(client licensing)。`:assignment-upsert` commit 時に
 operator の `committed-hours` を自動加算する。
 
 ## 6. 開示(governed read)
 
-`src/bizsupport/report.cljc`。`render-task` は RoutingGovernor が承認した
+`src/bizsupport/report.kotoba`。`render-task` は RoutingGovernor が承認した
 列のみを出力する。
 
 ## 7. デモ(`clojure -M:dev:run`)
 
-`src/bizsupport/sim.cljc` が8操作を actor に通す(§sim.cljc docstring 参照)。
+`src/bizsupport/sim.kotoba` が8操作を actor に通す(§sim.cljc docstring 参照)。
 
 ## 8. テスト(`clojure -M:dev:test`)
 
-`test/bizsupport/policy_contract_test.clj` が**ガバナンス契約を実行可能**に
-する。`test/bizsupport/phase_test.clj` が段階導入と「紛争は恒久的に人間専用」
-を保証。`test/bizsupport/facts_test.clj` が証明区分カタログ自体の正直さ
+`test/bizsupport/policy_contract_test.kotoba` が**ガバナンス契約を実行可能**に
+する。`test/bizsupport/phase_test.kotoba` が段階導入と「紛争は恒久的に人間専用」
+を保証。`test/bizsupport/facts_test.kotoba` が証明区分カタログ自体の正直さ
 (捏造禁止)を保証。
 
 ## 9. 実装と業態の対応
