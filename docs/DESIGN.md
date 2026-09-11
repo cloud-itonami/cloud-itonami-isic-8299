@@ -110,11 +110,11 @@ operator の `committed-hours` を自動加算する。
 `src/bizsupport/report.kotoba`。`render-task` は RoutingGovernor が承認した
 列のみを出力する。
 
-## 7. デモ(`clojure -M:dev:run`)
+## 7. デモ(`kbb -M:dev:run`)
 
 `src/bizsupport/sim.kotoba` が8操作を actor に通す(§sim.cljc docstring 参照)。
 
-## 8. テスト(`clojure -M:dev:test`)
+## 8. テスト(`kbb -M:dev:test`)
 
 `test/bizsupport/policy_contract_test.kotoba` が**ガバナンス契約を実行可能**に
 する。`test/bizsupport/phase_test.kotoba` が段階導入と「紛争は恒久的に人間専用」

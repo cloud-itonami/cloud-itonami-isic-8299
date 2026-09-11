@@ -26,7 +26,7 @@ cd cloud-itonami-isic-8299
 ## 2. Run tests
 
 ```bash
-clojure -M:dev:test
+kbb -M:dev:test
 ```
 
 Verify governor contract, store parity, phases, and facts. Fix failures before operating.

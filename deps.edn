@@ -37,9 +37,9 @@ io.github.kotoba-lang/langgraph
   :dev {:override-deps
         {io.github.kotoba-lang/langchain
          {:local/root "../../kotoba-lang/langchain"}}}
-  ;; clojure -M:dev:run  → drive the demo through one OperationActor
+  ;; kbb -M:dev:run  → drive the demo through one OperationActor
   :run {:main-opts ["-m" "bizsupport.sim"]}
-  ;; clojure -M:dev:render-html [out-file] → regenerate the build-time
+  ;; kbb -M:dev:render-html [out-file] → regenerate the build-time
   ;; operator console (docs/samples/operator-console.html) by actually
   ;; running the real actor.
   :render-html {:main-opts ["-m" "bizsupport.render-html"]}

@@ -19,7 +19,7 @@
     op12 プールへの受入(phase3・高信頼でも人間が署名)        → escalate → approve → commit
     op13 受入済みの応募を再度受入                          → candidate-lifecycle REJECT → hold
 
-  Run: clojure -M:dev:run"
+  Run: kbb -M:dev:run"
   (:require [langgraph.graph :as g]
             [bizsupport.store :as store]
             [bizsupport.operation :as op]
